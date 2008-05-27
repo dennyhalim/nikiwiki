@@ -1,0 +1,22 @@
+nikiwiki
+========
+
+Take a look at the [README](README) for information on installation, usage, and general hackery.
+
+## Pages
+- [Markdown syntax](Markdown_Syntax)
+- [Bit bucket](Bit_Bucket)
+
+## Todo
+- Some form of version control
+- User authentication
+- Special pages
+- Talk pages
+## Distributed wiki ideas
+- MogileFS
+- OpenAFS
+- Amazon S3/SimpleDB
+- NFS VPN options
+- Git based?
+
+testing

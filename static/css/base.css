@@ -1,0 +1,80 @@
+/*
+ * blog.css
+ * -----------------------------------------------------------------------------
+ * Visual design ideas shamelessly stolen from tomayko.com
+ */
+body {
+	margin: 0;
+	padding: 0;
+	background-color: #445;
+	color: #000;
+	font-family: "Verdana", "Helvetica", sans-serif;
+	font-size: 10pt;
+}
+
+#container {
+	width: 400px;
+	margin: 0 auto;
+	background-color: #FFF;
+	padding: 10px;
+	border-left: 1px solid #000;
+	border-right: 1px solid #000;
+}
+
+#header { font-family: "Helvetica"; }
+#header .top { border-bottom: 1px dotted #999; height: 20px; }
+#header .bottom { height: 20px; padding-top: 5px; padding-bottom: 10px; }
+#header .name { float: left; font-weight: bold; }
+#header .links { float: right; }
+#header .title { float: left; color: #555; }
+#header .date { float: right; }
+
+a:link, a:visited, a:active, a:hover { color: #55A; text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+code {
+	font-family: "Monaco", "ProFont", "Bitstream Vera Sans Mono", "American Typewriter", "Andale Mono", monospace;
+	font-size: 0.91em; /* 1.09em for Courier */
+
+	display: block;
+	background-color: #DED;
+	border-top: 1px dashed #777;
+	border-bottom: 1px dashed #777;
+	padding: 5px;
+}
+
+h1, h2, h3, h4, h5, h6 {
+	font-family: "Gill Sans", "Georgia", serif;
+	line-height: 1.5em;
+	text-align: left;
+	font-weight: normal;
+}
+
+h1 { text-align: center; }
+
+hr {
+	border: 0;
+	border-top: 1px dashed #333;
+}
+
+textarea.editbox {
+	font-family: "Monaco", fixed;
+	width: 95%;
+	height: 70%;
+}
+
+#editable {
+	width: 100%;
+	text-align: center;
+	display: none;
+}
+
+.warning {
+	border: 2px dashed #FCC;
+	background-color: #FEE;
+	color: #000;
+	font-weight: bold;
+	clear: both;
+	text-align: center;
+	width: 100%;
+}

@@ -1,0 +1,69 @@
+<html>
+<head>
+	<title>%(SITE_NAME)s :: %(title)s</title>
+	<link rel="stylesheet" type="text/css" href="%(STATIC_URL)s/css/base.css" />
+	<script src="%(STATIC_URL)s/js/jquery.js"></script>
+	<script type="text/javascript">
+	function setup_handlers() {
+		$('h1, h2, h3, h4, h5, h6, a.pagetitle').click(function() {
+			var revert = $('textarea.editbox').val();
+			$('#content').hide()
+			$('#editable').show();
+			$('textarea.editbox').focus();
+
+			$('input.save').click(function() {
+				var content = $('textarea.editbox').val();
+
+				$.post('/%(title)s', {
+					content: content
+				}, function(txt) {
+					$('#editable').hide();
+					$('#content').show().html(txt);
+					setup_handlers();
+				});
+			});
+
+			$('input.cancel').click(function() {
+				$('textarea.editbox').val(revert);
+				$('#editable').hide();
+				$('#content').show();
+				setup_handlers();
+			});
+		});
+	}
+
+	$(document).ready(function() {
+		setup_handlers();
+		if(document.location.protocol != 'https:') {
+			$('#header').append('<div class="warning">This is an insecure page. <a href="#" name="secure">Switch to SSL</a></div>');
+
+			$('[@name=secure]').click(function() {
+				document.location.protocol = 'https';
+			});
+		}
+	});
+	</script>
+</head>
+
+<body>
+<div id="container">
+	<div id="header">
+		<div class="top">
+			<div class="name">%(SITE_NAME)s</div>
+			<div class="links">
+				<a href="#" class="pagetitle">%(title)s</a>
+			</div>
+		</div>
+		<div class="bottom">
+			<div class="title">%(SITE_MOTTO)s</div>
+		</div>
+	</div>
+
+	<div id="content">%(content)s</div>
+	<div id="editable">
+		<textarea class="editbox">%(raw_content)s</textarea>
+		<div><input type="button" value="Save" class="save" /> or <input type="button" value="Cancel" class="cancel" /></div>
+	</div>
+</div>
+</body>
+</html>
