@@ -1,51 +1,31 @@
+from google.appengine.ext.webapp import util
+from google.appengine.api import users
 from markdown import markdown
-from os import unlink, stat, getpid
+from urlparse import urljoin
 from base64 import b64decode
-from pam import authenticate
+import nstore
 import web
-import sys
 
-import traceback
-from time import clock
-
-from nstore import FileStore
-
-INSTALL_DIR = '/home/synack/src/nikiwiki'
-PID_FILE = '/var/run/nikiwiki.pid'
-SSL_HOST = 'secure.example.com'
+REMOTE_DATASTORE = 'http://api.example.com/'
 
 urls = (
 	'/',					'WikiPage',
 	'/(?P<pagename>.+)',	'WikiPage',
 )
 
-def render(template, **kwargs):
-	vars = {
-		'STATIC_URL': 'http://static.example.com/niki',
-		'SITE_NAME': 'nikiwiki',
-		'SITE_MOTTO': 'everybody can edit, nobody can talk',
-		'CONTENT_TYPE': 'text/html',
-	}
-	vars.update(kwargs)
-
-	fd = open('%s/templates/%s' % (INSTALL_DIR, template), 'r')
-	result = fd.read()
-	fd.close()
-	web.header('Content-type', vars['CONTENT_TYPE'])
-	return result % vars
-
-def valid_auth():
-	auth = web.ctx.environ.get('HTTP_AUTHORIZATION', None)
-	if auth:
-		auth = b64decode(auth[6:])
-		username, password = auth.split(':')
-		return authenticate(username, password)
-	else:
-		return False
-
 class WikiPage(object):
 	def __init__(self):
-		self.data = FileStore('%s/data/' % INSTALL_DIR)
+		self.data = nstore.CacheDict(nstore.GoogleHTTPStore(REMOTE_DATASTORE), caches=[nstore.AppEngineStore()])
+	
+	def render(self, template, **kwargs):
+		vars = {
+			'STATIC_URL': 'http://static.neohippie.net',
+			'SITE_NAME': 'nikiwiki',
+			'SITE_MOTTO': 'anybody can edit, nobody can talk',
+			'CONTENT_TYPE': 'text/html',
+		}
+		vars.update(kwargs)
+		return self.data['templates/%s' % template] % vars
 
 	def GET(self, pagename='Main_Page'):
 		pagename = pagename.rstrip('/')
@@ -70,16 +50,12 @@ class WikiPage(object):
 			except KeyError:
 				content = self.data['Not_Found']
 			
-		print render('wiki.html', 
+		print self.render('wiki.html', 
 			title=pagename,
 			raw_content=content,
 			content=markdown(content))
 	
 	def POST(self, pagename):
-		if not valid_auth():
-			web.ctx.status = '401 Unauthorized'
-			web.header('WWW-Authenticate', 'Basic realm="Restricted"')
-			return
 		i = web.input()
 		content = i.content.decode('ascii', 'ignore')
 		try:
@@ -92,14 +68,11 @@ class WikiPage(object):
 		self.POST(pagename)
 	
 	def DELETE(self, pagename):
-		if not valid_auth():
-			web.ctx.status = '401 Unauthorized'
-			web.header('WWW-Authenticate', 'Basic realm=Restricted')
-			return
 		del self.data[pagename]
 
-if __name__ == '__main__':
-	fd = open(PID_FILE, 'w')
-	fd.write(str(getpid()))
-	fd.close()
-	web.run(urls, globals(), web.reloader)
+def main():
+	app = web.wsgifunc(web.webpyfunc(urls, globals(), web.reloader))
+	util.run_wsgi_app(app)
+
+if __name__ == "__main__":
+	main()
