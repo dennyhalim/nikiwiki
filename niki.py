@@ -6,8 +6,6 @@ from base64 import b64decode
 import nstore
 import web
 
-REMOTE_DATASTORE = 'http://api.example.com/'
-
 urls = (
 	'/',					'WikiPage',
 	'/(?P<pagename>.+)',	'WikiPage',
@@ -15,11 +13,11 @@ urls = (
 
 class WikiPage(object):
 	def __init__(self):
-		self.data = nstore.CacheDict(nstore.GoogleHTTPStore(REMOTE_DATASTORE), caches=[nstore.AppEngineStore()])
+		self.data = nstore.AppEngineStore()
 	
 	def render(self, template, **kwargs):
 		vars = {
-			'STATIC_URL': 'http://static.neohippie.net',
+			'STATIC_URL': 'http://niki.appspot.com/static',
 			'SITE_NAME': 'nikiwiki',
 			'SITE_MOTTO': 'anybody can edit, nobody can talk',
 			'CONTENT_TYPE': 'text/html',
@@ -58,10 +56,7 @@ class WikiPage(object):
 	def POST(self, pagename):
 		i = web.input()
 		content = i.content.decode('ascii', 'ignore')
-		try:
-			self.data[pagename] = content
-		except:
-			traceback.print_exc()
+		self.data[pagename] = content
 		print markdown(content)
 	
 	def PUT(self, pagename):

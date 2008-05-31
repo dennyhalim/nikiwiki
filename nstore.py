@@ -11,8 +11,6 @@ from httplib import HTTPConnection
 from cgi import parse_qs
 import urllib, urlparse
 
-import google.appengine.api.urlfetch
-
 class DictMixin(object):
 	def keys(self): pass
 	def __getitem__(self, key): pass
@@ -133,46 +131,55 @@ class HTTPStore(DictMixin):
 	def keys(self):
 		return self.__getitem__('').split('\n')
 
-class GoogleHTTPStore(DictMixin):
-	def __init__(self, url):
-		self.url = url
-	def __getitem__(self, key):
-		response = google.appengine.api.urlfetch.fetch(self.url + key, method=google.appengine.api.urlfetch.GET)
-		if response.status_code == 200:
-			return response.content
-		else:
-			raise KeyError(key)
-	def __setitem__(self, key, value):
-		response = google.appengine.api.urlfetch.fetch(self.url + key, method=google.appengine.api.urlfetch.POST, payload=value)
-		if response.status_code != 200:
-			raise IOError('%s %s' % (response.status_code, response.content))
+try:
+	import google.appengine.api.urlfetch
+	from google.appengine.ext import db
+	class GoogleHTTPStore(DictMixin):
+		def __init__(self, url):
+			self.url = url
+		def __getitem__(self, key):
+			response = google.appengine.api.urlfetch.fetch(self.url + key, method=google.appengine.api.urlfetch.GET)
+			if response.status_code == 200:
+				return response.content
+			else:
+				raise KeyError(key, response.content)
+		def __setitem__(self, key, value):
+			response = google.appengine.api.urlfetch.fetch(self.url + key, method=google.appengine.api.urlfetch.POST, payload=value)
+			if response.status_code != 200:
+				raise IOError('%s %s' % (response.status_code, response.content))
+		
+		def __delitem__(self, key):
+			response = google.appengine.api.urlfetch.fetch(self.url + key, method=google.appengine.api.urlfetch.DELETE)
+			if response.status_code != 200:
+				raise KeyError(key)
+		
+		def keys(self):
+			return self.__getitem__('').split('\n')
 	
-	def __delitem__(self, key):
-		response = google.appengine.api.urlfetch.fetch(self.url + key, method=google.appengine.api.urlfetch.DELETE)
-		if response.status_code != 200:
-			raise KeyError(key)
-	
-	def keys(self):
-		return self.__getitem__('').split('\n')
-
-from google.appengine.ext import db
-class AppEngineData(db.Model):
-	name = db.StringProperty(required=True)
-	value = db.BlobProperty(required=True)
-class AppEngineStore(DictMixin):
-	def __getitem__(self, key):
-		result = db.GqlQuery('SELECT * FROM AppEngineData WHERE name = :1', key).fetch(1)
-		if len(result) > 1:
-			return result[1]
-		else:
-			raise KeyError(key)
-	def __setitem__(self, key, value):
-		data = AppEngineData(name=key, value=value)
-		data.put()
-	def __delitem__(self, key):
-		db.GqlQuery('DELETE FROM AppEngineData WHERE name = :1', key)
-	def keys(self):
-		return db.GqlQuery("SELECT name FROM AppEngineData")
+	class AppEngineData(db.Model):
+		name = db.StringProperty(required=True)
+		value = db.TextProperty(required=True)
+	class AppEngineStore(DictMixin):
+		def __getitem__(self, key):
+			result = db.GqlQuery('SELECT * FROM AppEngineData WHERE name = :1', key).fetch(1)
+			if len(result) > 0:
+				return result[0].value
+			else:
+				raise KeyError(key)
+		def __setitem__(self, key, value):
+			self.__delitem__(key)
+			data = AppEngineData(name=key, value=value)
+			data.put()
+		def __delitem__(self, key):
+			query = db.GqlQuery('SELECT * FROM AppEngineData WHERE name = :1', key)
+			results = query.fetch(1000)
+			for result in results:
+				db.delete(result)
+		def keys(self):
+			for result in db.GqlQuery("SELECT * FROM AppEngineData").fetch(1000):
+				yield repr(result.name)
+except:
+	pass
 
 class PickleSerializer(UserDict):
 	def __init__(self, data):
