@@ -12,12 +12,18 @@ from cgi import parse_qs
 import urllib, urlparse
 
 class DictMixin(object):
+	"""
+	Superclass for implementing data sources
+	"""
 	def keys(self): pass
 	def __getitem__(self, key): pass
 	def __setitem__(self, key, value): pass
 	def __delitem__(self, key): pass
 
 class UserDict(object):
+	"""
+	Superclass for implementing data transforms
+	"""
 	def __init__(self, data):
 		self.data = data
 	def __getitem__(self, key):
@@ -30,6 +36,12 @@ class UserDict(object):
 		return self.data.keys()
 
 class FileStore(DictMixin):
+	"""
+	Implements file-backed storage. Automatically creates/removes subdirectories
+	when a key contains the / character. Normal path syntax is allowed within
+	keys. For example: data['my/data/here/../data'] is equivalent to
+	data['my/data/data']. You cannot escape beyond the root of the file store.
+	"""
 	def __init__(self, path):
 		self.path = path
 	
@@ -72,6 +84,10 @@ class FileStore(DictMixin):
 			os.rmdir(basepath)
 
 class MemoryStore(DictMixin):
+	"""
+	A simple storage mechanism that just wraps Python's builtin dict object.
+	This class isn't really necessary, but exists for the sake of consistency.
+	"""
 	def __init__(self):
 		self.data = {}
 	def __getitem__(self, key):
@@ -84,6 +100,13 @@ class MemoryStore(DictMixin):
 		return self.data.keys()
 
 class HTTPStore(DictMixin):
+	"""
+	Implements a storage backend over HTTP. This class acts as an HTTP client
+	for connecting to a RESTful storage server. The server needs to respond with
+	the of a given key for the GET request and an error or 200 OK message for a
+	POST or DELETE request. The remote server should also return a newline
+	delimited list of keys when the base URI is requested.
+	"""
 	def __init__(self, uri):
 		self.uri = uri
 	
@@ -132,6 +155,17 @@ class HTTPStore(DictMixin):
 		return self.__getitem__('').split('\n')
 
 class PickleSerializer(UserDict):
+	"""
+	Serializes python objects into a data store. When using this module, the
+	data returned from the serializer usually needs to be referenced by another
+	name before it can be modified. For example:
+	>>> data['foo'] = ['bar', 'baz']
+	>>> data['foo'][1] = 'foo'
+	Will throw an exception. Instead, try:
+	>>> foolist = data['foo']
+	>>> foolist[1] = 'foo'
+	>>> data['foo'] = foolist
+	"""
 	def __init__(self, data):
 		self.data = data
 	def __getitem__(self, key):
@@ -142,6 +176,11 @@ class PickleSerializer(UserDict):
 		del self.data[key]
 
 class B64KeyDict(UserDict):
+	"""
+	Converts all keys to base64 strings. This should be used when a backend
+	storage module doesn't support binary data in the keys (assuming you need to
+	use binary keys)
+	"""
 	def __getitem__(self, key):
 		return self.data[b64encode(key)]
 	def __setitem__(self, key, value):
@@ -152,6 +191,10 @@ class B64KeyDict(UserDict):
 		return [b64decode(x) for x in self.data.keys()]
 
 class LoggingDict(UserDict):
+	"""
+	Writes out a simple message to logfd whenever the dict is accessed or
+	changed. Useful for debugging.
+	"""
 	def __init__(self, data, logfd=None, date_format='%m/%d/%Y %H:%M:%S %Z'):
 		self.data = data
 		self.fd = logfd
@@ -170,6 +213,14 @@ class LoggingDict(UserDict):
 		del self.data[key]
 
 class CacheDict(UserDict):
+	"""
+	Implements a simple caching mechanism between two backend storage systems.
+	The data argument is the primary, authoratative data store. caches is a list
+	of data stores to be used for caching data. 
+	The sync_write argument should be set to True if the __setitem__ method
+	should block until all caches are updated. Otherwise, it will only block
+	until the primary data store is updated.
+	"""
 	def __init__(self, data, caches=[], sync_write=False):
 		self.data = data
 		self.caches = caches 
@@ -212,12 +263,20 @@ class CacheDict(UserDict):
 		return self.data.keys()
 
 class ZipDict(UserDict):
+	"""
+	Compresses the values in the data store using the Python builtin zlib module
+	"""
 	def __getitem__(self, key):
 		return zlib.decompress(self.data[key])
 	def __setitem__(self, key, value):
 		self.data[key] = zlib.compress(value)
 
 class HTTPDict(UserDict):
+	"""
+	Implements a server for the HTTPStore class. When initialized, the server
+	will spawn a separate thread to handle requests. A simple WSGI application
+	performs the actual application logic.
+	"""
 	def __init__(self, data, port=9608):
 		self.data = data
 		self.server = make_server('', port, self.wsgiapp)
