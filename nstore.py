@@ -78,7 +78,10 @@ class FileStore(DictMixin):
 	
 	def __delitem__(self, key):
 		path = self.get_path(key)
-		os.remove(path)
+		if os.path.isdir(path):
+			os.removedirs(path)
+		else:
+			os.remove(path)
 		basepath = '/'.join(path.split('/')[:-1])
 		if len(os.listdir(basepath)) == 0:
 			os.rmdir(basepath)
@@ -98,61 +101,6 @@ class MemoryStore(DictMixin):
 		del self.data[key]
 	def keys(self):
 		return self.data.keys()
-
-class HTTPStore(DictMixin):
-	"""
-	Implements a storage backend over HTTP. This class acts as an HTTP client
-	for connecting to a RESTful storage server. The server needs to respond with
-	the of a given key for the GET request and an error or 200 OK message for a
-	POST or DELETE request. The remote server should also return a newline
-	delimited list of keys when the base URI is requested.
-	"""
-	def __init__(self, uri):
-		self.uri = uri
-	
-	def __getitem__(self, key):
-		target = urlparse.urlparse(self.uri)
-		if target.netloc.find(':') != -1:
-			server, port = target.netloc.split(':', 1)
-		else:
-			server = target.netloc
-			port = 80
-		conn = HTTPConnection(server, int(port))
-		conn.request('GET', '/%s' % urllib.quote(key))
-		response = conn.getresponse()
-		if response.status == 404:
-			raise KeyError(key)
-		if response.status != 200:
-			raise IOError(response.status)
-		chunk = True
-		data = ''
-		while chunk != '':
-			chunk = response.read()
-			data += chunk
-		return data
-	
-	def __setitem__(self, key, value):
-		target = urlparse.urljoin(self.uri, urllib.quote(key))
-		response = urllib.urlopen(target, urllib.urlencode({'value': value}))
-		result = response.read()
-	
-	def __delitem__(self, key):
-		target = urlparse.urlparse(self.uri)
-		if target.netloc.find(':') != -1:
-			server, port = target.netloc.split(':', 1)
-		else:
-			server = target.netloc
-			port = 80
-		conn = HTTPConnection(server, int(port))
-		conn.request('DELETE', '/%s' % urllib.quote(key))
-		response = conn.getresponse()
-		if response.status == 404:
-			raise KeyError(key)
-		if response.status != 200:
-			raise IOError('%s %s' % (response.status, response.reason))
-	
-	def keys(self):
-		return self.__getitem__('').split('\n')
 
 class PickleSerializer(UserDict):
 	"""
@@ -189,6 +137,51 @@ class B64KeyDict(UserDict):
 		del self.data[b64encode(key)]
 	def keys(self):
 		return [b64decode(x) for x in self.data.keys()]
+
+class VersionedDict(UserDict):
+	def __getitem__(self, key):
+		try:
+			key, rev = key.rsplit('@', 1)
+			rev = int(rev)
+		except:
+			rev = int(self.data['%s/latest' % key])
+		return self.data['%s/%i' % (key, rev)]
+	def __setitem__(self, key, value):
+		try:
+			rev = int(self.data['%s/latest' % key])
+			rev += 1
+		except KeyError:
+			rev = 0
+		self.data['%s/%i' % (key, rev)] = value
+		self.data['%s/latest' % key] = str(rev)
+
+		try:
+			revisions = self.data['%s/revisions' % key]
+			revisions = cPickle.loads(revisions)
+		except KeyError:
+			revisions = []
+		revisions.append(rev)
+		self.data['%s/revisions' % key] = cPickle.dumps(revisions)
+	def __delitem__(self, key):
+		revisions = cPickle.loads(self.data['%s/revisions' % key])
+		for rev in revisions:
+			del self.data['%s/%i' % (key, rev)]
+		del self.data['%s/latest' % key]
+		del self.data['%s/revisions' % key]
+		del self.data[key]
+
+class PrefixDict(UserDict):
+	def __init__(self, data, prefix):
+		self.data = data
+		self.prefix = prefix
+	def __getitem__(self, key):
+		return self.data[self.prefix + key]
+	def __setitem__(self, key, value):
+		self.data[self.prefix + key] = value
+	def __delitem__(self, key):
+		del self.data[self.prefix + key]
+	def keys(self):
+		return [k[len(self.prefix):] for k in self.data.keys() if k.startswith(self.prefix)]
 
 class LoggingDict(UserDict):
 	"""
@@ -271,6 +264,61 @@ class ZipDict(UserDict):
 	def __setitem__(self, key, value):
 		self.data[key] = zlib.compress(value)
 
+class HTTPStore(DictMixin):
+	"""
+	Implements a storage backend over HTTP. This class acts as an HTTP client
+	for connecting to a RESTful storage server. The server needs to respond with
+	the of a given key for the GET request and an error or 200 OK message for a
+	POST or DELETE request. The remote server should also return a newline
+	delimited list of keys when the base URI is requested.
+	"""
+	def __init__(self, uri):
+		self.uri = uri
+	
+	def __getitem__(self, key):
+		target = urlparse.urlparse(self.uri)
+		if target.netloc.find(':') != -1:
+			server, port = target.netloc.split(':', 1)
+		else:
+			server = target.netloc
+			port = 80
+		conn = HTTPConnection(server, int(port))
+		conn.request('GET', '/%s' % urllib.quote(key))
+		response = conn.getresponse()
+		if response.status == 404:
+			raise KeyError(key)
+		if response.status != 200:
+			raise IOError(response.status)
+		chunk = True
+		data = ''
+		while chunk != '':
+			chunk = response.read()
+			data += chunk
+		return data
+	
+	def __setitem__(self, key, value):
+		target = urlparse.urljoin(self.uri, urllib.quote(key))
+		response = urllib.urlopen(target, urllib.urlencode({'value': value}))
+		result = response.read()
+	
+	def __delitem__(self, key):
+		target = urlparse.urlparse(self.uri)
+		if target.netloc.find(':') != -1:
+			server, port = target.netloc.split(':', 1)
+		else:
+			server = target.netloc
+			port = 80
+		conn = HTTPConnection(server, int(port))
+		conn.request('DELETE', '/%s' % urllib.quote(key))
+		response = conn.getresponse()
+		if response.status == 404:
+			raise KeyError(key)
+		if response.status != 200:
+			raise IOError('%s %s' % (response.status, response.reason))
+	
+	def keys(self):
+		return self.__getitem__('').split('\n')
+
 class HTTPDict(UserDict):
 	"""
 	Implements a server for the HTTPStore class. When initialized, the server
@@ -314,3 +362,66 @@ class HTTPDict(UserDict):
 			del self.data[key]
 			start_response('200 OK', [('Content-type', 'text/plain')])
 			return ['']
+
+try:
+	import google.appengine.api.urlfetch
+	from google.appengine.ext import db
+	class AppEngineData(db.Model):
+		name = db.StringProperty(required=True)
+		value = db.BlobProperty(required=True)
+	class AppEngineStore(DictMixin):
+		def __getitem__(self, key):
+			result = db.GqlQuery('SELECT * FROM AppEngineData WHERE name = :1', key).fetch(1)
+			if len(result) > 1:
+				return result[1]
+			else:
+				raise KeyError(key)
+		def __setitem__(self, key, value):
+			data = AppEngineData(name=key, value=value)
+			data.put()
+		def __delitem__(self, key):
+			db.GqlQuery('DELETE FROM AppEngineData WHERE name = :1', key)
+		def keys(self):
+			return db.GqlQuery("SELECT name FROM AppEngineData")
+	class GoogleHTTPStore(DictMixin):
+		def __init__(self, url):
+			self.url = url
+		def __getitem__(self, key):
+			response = google.appengine.api.urlfetch.fetch(self.url + key, method=google.appengine.api.urlfetch.GET)
+			if response.status_code == 200:
+				return response.content
+			else:
+				raise KeyError(key)
+		def __setitem__(self, key, value):
+			response = google.appengine.api.urlfetch.fetch(self.url + key, method=google.appengine.api.urlfetch.POST, payload=value)
+			if response.status_code != 200:
+				raise IOError('%s %s' % (response.status_code, response.content))
+		def __delitem__(self, key):
+			response = google.appengine.api.urlfetch.fetch(self.url + key, method=google.appengine.api.urlfetch.DELETE)
+			if response.status_code != 200:
+				raise KeyError(key)
+		def keys(self):
+			return self.__getitem__('').split('\n')
+except ImportError: pass
+
+def basic_test(data):
+	data['test'] = 'foo'
+	assert data['test'] == 'foo'
+	data['test1/test2'] = 'test3'
+	assert data['test1/test2'] == 'test3'
+	#del data['test']
+	#del data['test1/test2']
+
+def test():
+	data = FileStore('/tmp/nstore_test')
+	basic_test(data)
+	print 'FileStore'
+	data = VersionedDict(data)
+	basic_test(data)
+	print 'FileStore/VersionedDict'
+	data = B64KeyDict(data)
+	basic_test(data)
+	print 'FileStore/VersionedDict/B64KeyDict'
+
+if __name__ == "__main__":
+	test()
