@@ -1,25 +1,18 @@
+from wsgiref.simple_server import make_server
 from markdown import markdown
-from os import unlink, stat, getpid
-from base64 import b64decode
 from pam import authenticate
-import web
+from cgi import FieldStorage
+from base64 import b64decode
+from os import getpid
 import sys
-
-import traceback
-from time import clock
+import re
 
 from nstore import FileStore
 
 INSTALL_DIR = '/home/synack/src/nikiwiki'
 PID_FILE = '/var/run/nikiwiki.pid'
-SSL_HOST = 'secure.example.com'
 
-urls = (
-	'/',					'WikiPage',
-	'/(?P<pagename>.+)',	'WikiPage',
-)
-
-def render(template, **kwargs):
+def render(template, app, **kwargs):
 	vars = {
 		'STATIC_URL': 'http://static.example.com/niki',
 		'SITE_NAME': 'nikiwiki',
@@ -31,11 +24,11 @@ def render(template, **kwargs):
 	fd = open('%s/templates/%s' % (INSTALL_DIR, template), 'r')
 	result = fd.read()
 	fd.close()
-	web.header('Content-type', vars['CONTENT_TYPE'])
+	app.header('Content-type', vars['CONTENT_TYPE'])
 	return result % vars
 
-def valid_auth():
-	auth = web.ctx.environ.get('HTTP_AUTHORIZATION', None)
+def valid_auth(environ):
+	auth = environ.get('HTTP_AUTHORIZATION', None)
 	if auth:
 		auth = b64decode(auth[6:])
 		username, password = auth.split(':')
@@ -45,6 +38,7 @@ def valid_auth():
 
 class WikiPage(object):
 	def __init__(self):
+		self.app = None
 		self.data = FileStore('%s/data/' % INSTALL_DIR)
 
 	def GET(self, pagename='Main_Page'):
@@ -70,36 +64,98 @@ class WikiPage(object):
 			except KeyError:
 				content = self.data['Not_Found']
 			
-		print render('wiki.html', 
+		yield render('wiki.html', self.app,
 			title=pagename,
 			raw_content=content,
 			content=markdown(content))
+		return
 	
-	def POST(self, pagename):
-		if not valid_auth():
-			web.ctx.status = '401 Unauthorized'
-			web.header('WWW-Authenticate', 'Basic realm="Restricted"')
+	def POST(self, pagename=None):
+		if not valid_auth(self.app.environ):
+			self.app.status = '401 Unauthorized'
+			self.app.header('WWW-Authenticate', 'Basic realm="Restricted"')
+			yield 'Unauthorized'
 			return
-		i = web.input()
-		content = i.content.decode('ascii', 'ignore')
+		if not pagename:
+			self.app.status = '400 Bad Request'
+			yield 'Bad request'
+			return
 		try:
+			content = self.app.get_content()['content'].value
 			self.data[pagename] = content
+			yield markdown(content)
 		except:
-			traceback.print_exc()
-		print markdown(content)
+			self.app.status = '500 Internal Server Error'
+			yield 'Unable to write content to data store\n'
 	
 	def PUT(self, pagename):
 		self.POST(pagename)
 	
 	def DELETE(self, pagename):
-		if not valid_auth():
-			web.ctx.status = '401 Unauthorized'
-			web.header('WWW-Authenticate', 'Basic realm=Restricted')
+		if not valid_auth(self.app.environ):
+			self.app.status = '401 Unauthorized'
+			self.app.header('WWW-Authenticate', 'Basic realm=Restricted')
 			return
 		del self.data[pagename]
+		return
+
+class WSGIApp(object):
+	def __init__(self, urls=None):
+		self.load_urls(urls)
+	
+	def __call__(self, environ, start_response):
+		self.environ = environ
+		self.start_response = start_response
+		self.headers = []
+		self.status = '200 OK'
+		return self.handle_request()
+	
+	def handle_request(self):
+		for url in self.urls:
+			match = url.match(self.environ['PATH_INFO'])
+			if match:
+				groupdict = match.groupdict()
+				if not groupdict:
+					groupdict = {}
+				handler = self.urls[url]()
+				handler.app = self
+				if hasattr(handler, self.environ['REQUEST_METHOD']):
+					method = getattr(handler, self.environ['REQUEST_METHOD'])
+					sent_headers = False
+
+					response = method(**groupdict)
+					self.start_response(self.status, self.headers)
+					return [x.encode('ascii', 'ignore') for x in response]
+	
+	def header(self, name, value):
+		assert self.headers != None
+		self.headers.append((name, value))
+	
+	def get_content(self):
+		input = self.environ['wsgi.input']
+		form = FieldStorage(fp=input, environ=self.environ, keep_blank_values=True)
+		return form
+	
+	def load_urls(self, urls):
+		self.urls = {}
+		for url in urls:
+			handler = urls[url]
+			url = re.compile(url)
+			self.urls[url] = handler
+
+urls = {
+	'/':					WikiPage,
+	'/(?P<pagename>.+)':	WikiPage,
+}
+
+def main():
+	server = make_server('', 8080, WSGIApp(urls))
+	server.serve_forever()
 
 if __name__ == '__main__':
+	# Create a PID file
 	fd = open(PID_FILE, 'w')
 	fd.write(str(getpid()))
 	fd.close()
-	web.run(urls, globals(), web.reloader)
+
+	main()
