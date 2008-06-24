@@ -1,14 +1,17 @@
-from wsgiref.simple_server import make_server
-from markdown import markdown
+from flup.server.fcgi import WSGIServer
+from SocketServer import TCPServer, ThreadingMixIn
+from os import getpid
+
 from pam import authenticate
 from cgi import FieldStorage
 from base64 import b64decode
-from os import getpid
+
+from markdown import markdown
+from nstore import FileStore
 import sys
 import re
 
-from nstore import FileStore
-
+LISTEN_PORT = 9609
 INSTALL_DIR = '/home/synack/src/nikiwiki'
 PID_FILE = '/var/run/nikiwiki.pid'
 
@@ -149,8 +152,7 @@ urls = {
 }
 
 def main():
-	server = make_server('', 8080, WSGIApp(urls))
-	server.serve_forever()
+	server = WSGIServer(WSGIApp(urls), bindAddress=('0.0.0.0', LISTEN_PORT)).run()
 
 if __name__ == '__main__':
 	# Create a PID file
