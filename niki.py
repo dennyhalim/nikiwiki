@@ -1,4 +1,4 @@
-from flup.server.fcgi import WSGIServer
+from flup.server.fcgi_fork import WSGIServer
 from os import getpid
 
 from pam import authenticate
@@ -120,14 +120,14 @@ class WSGIApp(object):
 				handler.app = self
 				if hasattr(handler, self.environ['REQUEST_METHOD']):
 					method = getattr(handler, self.environ['REQUEST_METHOD'])
-					sent_headers = False
 
 					response = method(**groupdict)
+					response = [x.encode('ascii', 'ignore') for x in response]
+					self.header('Content-Length', str(sum([len(x) for x in response])))
 					self.start_response(self.status, self.headers)
-					return [x.encode('ascii', 'ignore') for x in response]
+					return response
 	
 	def header(self, name, value):
-		assert self.headers != None
 		self.headers.append((name, value))
 	
 	def get_content(self):
