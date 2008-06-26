@@ -1,5 +1,4 @@
 from flup.server.fcgi import WSGIServer
-from SocketServer import TCPServer, ThreadingMixIn
 from os import getpid
 
 from pam import authenticate
@@ -24,11 +23,8 @@ def render(template, app, **kwargs):
 	}
 	vars.update(kwargs)
 
-	fd = open('%s/templates/%s' % (INSTALL_DIR, template), 'r')
-	result = fd.read()
-	fd.close()
 	app.header('Content-type', vars['CONTENT_TYPE'])
-	return result % vars
+	return template % vars
 
 def valid_auth(environ):
 	auth = environ.get('HTTP_AUTHORIZATION', None)
@@ -67,7 +63,7 @@ class WikiPage(object):
 			except KeyError:
 				content = self.data['Not_Found']
 			
-		yield render('wiki.html', self.app,
+		yield render(self.data['templates/wiki.html'], self.app,
 			title=pagename,
 			raw_content=content,
 			content=markdown(content))
