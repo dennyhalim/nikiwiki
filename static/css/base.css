@@ -29,6 +29,11 @@ body {
 #header .title { float: left; color: #555; }
 #header .date { float: right; }
 
+#delete {
+	display: inline;
+	padding-left: 5px;
+}
+
 a:link, a:visited, a:active, a:hover { color: #55A; text-decoration: none; }
 a:hover { text-decoration: underline; }
 
@@ -51,6 +56,8 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 h1 { text-align: center; }
+h2 { border-bottom: 1px dotted #000; }
+h3, h4 { font-weight: bold; }
 
 hr {
 	border: 0;
@@ -60,13 +67,18 @@ hr {
 textarea.editbox {
 	font-family: "Monaco", fixed;
 	width: 95%;
-	height: 70%;
+	height: 60%;
+	margin-top: 10px;
 }
 
 #editable {
 	width: 100%;
 	text-align: center;
 	display: none;
+}
+
+#buttons {
+	margin-top: 10px;
 }
 
 .warning {

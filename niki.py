@@ -1,4 +1,6 @@
+#!/home/synack/src/nikiwiki/env/bin/python
 from flup.server.fcgi_fork import WSGIServer
+from subprocess import Popen, PIPE
 from os import getpid
 
 from pam import authenticate
@@ -13,147 +15,140 @@ import re
 LISTEN_PORT = 9609
 INSTALL_DIR = '/home/synack/src/nikiwiki'
 PID_FILE = '/var/run/nikiwiki.pid'
+MARKDOWN_EXT = ['toc', 'fenced_code', 'codehilite']
 
 def render(template, app, **kwargs):
-	vars = {
-		'STATIC_URL': 'http://static.example.com/niki',
-		'SITE_NAME': 'nikiwiki',
-		'SITE_MOTTO': 'everybody can edit, nobody can talk',
-		'CONTENT_TYPE': 'text/html',
-	}
-	vars.update(kwargs)
+    vars = {
+        'BASE_URL': 'https://synack.me/niki',
+        'STATIC_URL': 'https://synack.me/niki/static',
+        'SITE_NAME': 'niki',
+        'SITE_MOTTO': '*insert fortune here*',
+        'CONTENT_TYPE': 'text/html',
+    }
+    vars.update(kwargs)
 
-	app.header('Content-type', vars['CONTENT_TYPE'])
-	return template % vars
+    try:
+        fortune = Popen(['/usr/games/fortune', '-s'], stdout=PIPE).stdout.read()
+        vars['SITE_MOTTO'] = fortune
+    except: pass
+
+    app.header('Content-type', vars['CONTENT_TYPE'])
+    return template % vars
 
 def valid_auth(environ):
-	auth = environ.get('HTTP_AUTHORIZATION', None)
-	if auth:
-		auth = b64decode(auth[6:])
-		username, password = auth.split(':')
-		return authenticate(username, password)
-	else:
-		return False
+    auth = environ.get('HTTP_AUTHORIZATION', None)
+    if auth:
+        auth = b64decode(auth[6:])
+        username, password = auth.split(':')
+        return authenticate(username, password)
+    else:
+        return False
 
 class WikiPage(object):
-	def __init__(self):
-		self.app = None
-		self.data = FileStore('%s/data/' % INSTALL_DIR)
+    def __init__(self):
+        self.app = None
+        self.data = FileStore('%s/data/' % INSTALL_DIR)
 
-	def GET(self, pagename='Main_Page'):
-		pagename = pagename.rstrip('/')
-		try:
-			content = self.data[pagename]
-		except KeyError:
-			try:
-				entries = []
-				for line in self.data[pagename + '/.index'].split('\n'):
-					entry = line.split(',', 1)
-					if len(entry) == 2:
-						entries.append(entry)
-				entries.sort(key=lambda x: x[1], reverse=True)
-				latest = entries[:5]
-				content = ''
-				for slug, timestamp in latest:
-					content += self.data[pagename + '/' + slug]
-					content += '\n***\n' 
-				content += '#### Older posts\n\n'
-				for slug, timestamp in entries:
-					content += '[%s](%s/%s)  \n' % (slug, pagename, slug)
-			except KeyError:
-				content = self.data['Not_Found']
-			
-		yield render(self.data['templates/wiki.html'], self.app,
-			title=pagename,
-			raw_content=content,
-			content=markdown(content))
-		return
-	
-	def POST(self, pagename=None):
-		if not valid_auth(self.app.environ):
-			self.app.status = '401 Unauthorized'
-			self.app.header('WWW-Authenticate', 'Basic realm="Restricted"')
-			yield 'Unauthorized'
-			return
-		if not pagename:
-			self.app.status = '400 Bad Request'
-			yield 'Bad request'
-			return
-		try:
-			content = self.app.get_content()['content'].value
-			self.data[pagename] = content
-			yield markdown(content)
-		except:
-			self.app.status = '500 Internal Server Error'
-			yield 'Unable to write content to data store\n'
-	
-	def PUT(self, pagename):
-		self.POST(pagename)
-	
-	def DELETE(self, pagename):
-		if not valid_auth(self.app.environ):
-			self.app.status = '401 Unauthorized'
-			self.app.header('WWW-Authenticate', 'Basic realm=Restricted')
-			return
-		del self.data[pagename]
-		return
+    def GET(self, pagename='Main_Page'):
+        pagename = pagename.rstrip('/')
+        try:
+            content = self.data[pagename]
+        except KeyError:
+            try:
+                entries = []
+                for line in self.data[pagename + '/.index'].split('\n'):
+                    entry = line.split(',', 1)
+                    if len(entry) == 2:
+                        entries.append(entry)
+                entries.sort(key=lambda x: x[1], reverse=True)
+                latest = entries[:5]
+                content = ''
+                for slug, timestamp in latest:
+                    content += self.data[pagename + '/' + slug]
+                    content += '\n***\n' 
+                content += '#### Older posts\n\n'
+                for slug, timestamp in entries:
+                    content += '[%s](%s/%s)  \n' % (slug, pagename, slug)
+            except KeyError:
+                content = self.data['Not_Found']
+            
+        yield render(self.data['templates/wiki.html'], self.app,
+            title=pagename,
+            raw_content=content,
+            content=markdown(content, MARKDOWN_EXT))
+        return
+    
+    def POST(self, pagename=None):
+        if not pagename:
+            self.app.status = '400 Bad Request'
+            yield 'Bad request'
+            return
+        try:
+            content = self.app.get_content()['content'].value
+            self.data[pagename] = content
+            yield markdown(content, MARKDOWN_EXT)
+        except:
+            self.app.status = '500 Internal Server Error'
+            yield 'Unable to write content to data store\n'
+    
+    def PUT(self, pagename):
+        self.POST(pagename)
+    
+    def DELETE(self, pagename):
+        del self.data[pagename]
+        return
 
 class WSGIApp(object):
-	def __init__(self, urls=None):
-		self.load_urls(urls)
-	
-	def __call__(self, environ, start_response):
-		self.environ = environ
-		self.start_response = start_response
-		self.headers = []
-		self.status = '200 OK'
-		return self.handle_request()
-	
-	def handle_request(self):
-		for url in self.urls:
-			match = url.match(self.environ['PATH_INFO'])
-			if match:
-				groupdict = match.groupdict()
-				if not groupdict:
-					groupdict = {}
-				handler = self.urls[url]()
-				handler.app = self
-				if hasattr(handler, self.environ['REQUEST_METHOD']):
-					method = getattr(handler, self.environ['REQUEST_METHOD'])
+    def __init__(self, urls=None):
+        self.load_urls(urls)
+    
+    def __call__(self, environ, start_response):
+        self.environ = environ
+        self.start_response = start_response
+        self.headers = []
+        self.status = '200 OK'
+        return self.handle_request()
+    
+    def handle_request(self):
+        for url in self.urls:
+            match = url.match(self.environ['PATH_INFO'])
+            if match:
+                groupdict = match.groupdict()
+                if not groupdict:
+                    groupdict = {}
+                handler = self.urls[url]()
+                handler.app = self
+                if hasattr(handler, self.environ['REQUEST_METHOD']):
+                    method = getattr(handler, self.environ['REQUEST_METHOD'])
 
-					response = method(**groupdict)
-					response = [x.encode('ascii', 'ignore') for x in response]
-					self.header('Content-Length', str(sum([len(x) for x in response])))
-					self.start_response(self.status, self.headers)
-					return response
-	
-	def header(self, name, value):
-		self.headers.append((name, value))
-	
-	def get_content(self):
-		input = self.environ['wsgi.input']
-		form = FieldStorage(fp=input, environ=self.environ, keep_blank_values=True)
-		return form
-	
-	def load_urls(self, urls):
-		self.urls = {}
-		for url in urls:
-			handler = urls[url]
-			url = re.compile(url)
-			self.urls[url] = handler
+                    response = method(**groupdict)
+                    response = [x.encode('ascii', 'ignore') for x in response]
+                    self.header('Content-Length', str(sum([len(x) for x in response])))
+                    self.start_response(self.status, self.headers)
+                    return response
+    
+    def header(self, name, value):
+        self.headers.append((name, value))
+    
+    def get_content(self):
+        input = self.environ['wsgi.input']
+        form = FieldStorage(fp=input, environ=self.environ, keep_blank_values=True)
+        return form
+    
+    def load_urls(self, urls):
+        self.urls = {}
+        for url in urls:
+            handler = urls[url]
+            url = re.compile(url)
+            self.urls[url] = handler
 
 urls = {
-	'/':					WikiPage,
-	'/(?P<pagename>.+)':	WikiPage,
+    '^/niki/(?P<pagename>.+)$': WikiPage,
+    '^/niki/$':                 WikiPage,
 }
 
 def main():
-	server = WSGIServer(WSGIApp(urls), bindAddress=('0.0.0.0', LISTEN_PORT)).run()
+    server = WSGIServer(WSGIApp(urls), bindAddress=('0.0.0.0', LISTEN_PORT), debug=True).run()
 
 if __name__ == '__main__':
-	# Create a PID file
-	fd = open(PID_FILE, 'w')
-	fd.write(str(getpid()))
-	fd.close()
-
-	main()
+    main()
