@@ -14,10 +14,9 @@ Content authoring is done using the [markdown syntax](Markdown_Syntax) allowing 
 Requirements
 ------------
 - A recent Python. Tested with 2.5, but older versions may work as well
-- The web.py framework <http://www.webpy.org/>
 - Markdown python module <http://www.freewisdom.org/projects/python-markdown/Installation>
-or
-- Google App Engine (with the appengine branch)
+- Flup <http://trac.saddi.com/flup>
+- PAM <http://atlee.ca/software/pam/>
 
 Installation
 -----
