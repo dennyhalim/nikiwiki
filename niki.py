@@ -1,12 +1,16 @@
 #!/home/synack/src/nikiwiki/env/bin/python
-from flup.server.fcgi_fork import WSGIServer
+from wsgiref.simple_server import make_server, WSGIRequestHandler
 from subprocess import Popen, PIPE
+from traceback import format_exc
 from os import getpid
+import os.path
 
 from pam import authenticate
 from cgi import FieldStorage
 from base64 import b64decode
 
+from webob import Request, Response
+from webob.exc import *
 from markdown import markdown
 from nstore import FileStore
 import sys
@@ -14,20 +18,19 @@ import re
 
 import embed
 
-LISTEN_PORT = 9609
-INSTALL_DIR = '/home/synack/src/nikiwiki'
+LISTEN_PORT = 8082
+INSTALL_DIR = '/home/synack/tmp/nikiwiki'
 PID_FILE = '/var/run/nikiwiki.pid'
 MARKDOWN_EXT = ['toc', 'fenced_code', 'codehilite', 'tables']
 
 embedpattern = re.compile('\$(?P<funcname>.*)\((?P<args>.*)\)\$')
 
-def render(template, app, **kwargs):
+def render(template, **kwargs):
     vars = {
-        'BASE_URL': 'https://synack.me/niki',
-        'STATIC_URL': 'https://synack.me/niki/static',
+        'BASE_URL': 'http://synack.me:8082',
+        'STATIC_URL': 'http://synack.me:8082/static',
         'SITE_NAME': 'niki',
         'SITE_MOTTO': '*insert fortune here*',
-        'CONTENT_TYPE': 'text/html',
     }
     vars.update(kwargs)
 
@@ -36,7 +39,6 @@ def render(template, app, **kwargs):
         vars['SITE_MOTTO'] = fortune
     except: pass
 
-    app.header('Content-type', vars['CONTENT_TYPE'])
     return template % vars
 
 def valid_auth(environ):
@@ -66,10 +68,9 @@ def patch_content(text):
 
 class WikiPage(object):
     def __init__(self):
-        self.app = None
         self.data = FileStore('%s/data/' % INSTALL_DIR)
 
-    def GET(self, pagename='Main_Page'):
+    def GET(self, request, pagename='Main_Page'):
         pagename = pagename.rstrip('/')
         try:
             content = self.data[pagename]
@@ -92,83 +93,84 @@ class WikiPage(object):
             except KeyError:
                 content = self.data['Not_Found']
             
-        yield render(self.data['templates/wiki.html'], self.app,
+        return Response(status=200, body=render(
+            self.data['templates/wiki.html'],
             title=pagename,
             raw_content=content,
-            content=markdown(patch_content(content), MARKDOWN_EXT))
-        return
+            content=markdown(patch_content(content), MARKDOWN_EXT)))
     
-    def POST(self, pagename=None):
+    def POST(self, request, pagename=None):
         if not pagename:
-            self.app.status = '400 Bad Request'
-            yield 'Bad request'
-            return
+            return HTTPBadRequest()
         try:
-            content = self.app.get_content()['content'].value
+            content = request.POST['content']
             self.data[pagename] = content
-            yield markdown(patch_content(content), MARKDOWN_EXT)
+            return Response(status=200, body=markdown(patch_content(content), MARKDOWN_EXT))
         except:
-            self.app.status = '500 Internal Server Error'
-            yield 'Unable to write content to data store\n'
+            return HTTPInternalServerError(explanation='Unable to write content to data store')
     
-    def PUT(self, pagename):
-        self.POST(pagename)
+    def PUT(self, request, pagename):
+        return self.POST(request, pagename)
     
-    def DELETE(self, pagename):
+    def DELETE(self, request, pagename):
         del self.data[pagename]
-        return
+        return Response(status=200)
+
+class StaticFile(object):
+    def GET(self, request, filename):
+        path = os.path.normcase(os.path.normpath(os.path.join(INSTALL_DIR, 'static/', filename)))
+        if not path.startswith(INSTALL_DIR):
+            return HTTPBadRequest()
+        if not os.path.exists(path):
+            return HTTPNotFound()
+        return Response(status=200, body=file(path).read())
+
 
 class WSGIApp(object):
-    def __init__(self, urls=None):
-        self.load_urls(urls)
+    def __init__(self, urls):
+        self.urls = [(re.compile(pattern), handler) for pattern, handler in urls]
     
     def __call__(self, environ, start_response):
-        self.environ = environ
-        self.start_response = start_response
-        self.headers = []
-        self.status = '200 OK'
-        return self.handle_request()
-    
-    def handle_request(self):
-        for url in self.urls:
-            match = url.match(self.environ['PATH_INFO'])
+        request = Request(environ)
+
+        response = None
+        for pattern, handler in self.urls:
+            match = pattern.match(request.path_info)
             if match:
                 groupdict = match.groupdict()
                 if not groupdict:
                     groupdict = {}
-                handler = self.urls[url]()
-                handler.app = self
-                if hasattr(handler, self.environ['REQUEST_METHOD']):
-                    method = getattr(handler, self.environ['REQUEST_METHOD'])
 
-                    response = method(**groupdict)
-                    response = [x.encode('ascii', 'ignore') for x in response]
-                    self.header('Content-Length', str(sum([len(x) for x in response])))
-                    self.start_response(self.status, self.headers)
-                    return response
-    
-    def header(self, name, value):
-        self.headers.append((name, value))
-    
-    def get_content(self):
-        input = self.environ['wsgi.input']
-        form = FieldStorage(fp=input, environ=self.environ, keep_blank_values=True)
-        return form
-    
-    def load_urls(self, urls):
-        self.urls = {}
-        for url in urls:
-            handler = urls[url]
-            url = re.compile(url)
-            self.urls[url] = handler
+                handler = handler()
+                if hasattr(handler, request.method.upper()):
+                    method = getattr(handler, request.method.upper())
+                    try:
+                        response = method(request, **groupdict)
+                    except:
+                        response = Response(status=500, body=format_exc())
+                        response.headers.add('Content-type', 'text/plain')
+                    break
 
-urls = {
-    '^/niki/(?P<pagename>.+)$': WikiPage,
-    '^/niki/$':                 WikiPage,
-}
+        if not response:
+            response = HTTPNotFound()
+        return response(environ, start_response)
+
+urls = [
+    ('^/static/(?P<filename>.*)$',   StaticFile),
+    ('^/(?P<pagename>.+)$',          WikiPage),
+    ('^/$',                          WikiPage),
+]
 
 def main():
-    server = WSGIServer(WSGIApp(urls), bindAddress=('0.0.0.0', LISTEN_PORT), debug=True).run()
+    app = WSGIApp(urls)
+
+    wsgi = WSGIRequestHandler
+    def address_string(self):
+        return self.client_address[0]
+    wsgi.address_string = address_string
+
+    server = make_server('0.0.0.0', LISTEN_PORT, app, handler_class=wsgi)
+    server.serve_forever()
 
 if __name__ == '__main__':
     main()
