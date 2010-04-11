@@ -12,10 +12,14 @@ from nstore import FileStore
 import sys
 import re
 
+import embed
+
 LISTEN_PORT = 9609
 INSTALL_DIR = '/home/synack/src/nikiwiki'
 PID_FILE = '/var/run/nikiwiki.pid'
-MARKDOWN_EXT = ['toc', 'fenced_code', 'codehilite']
+MARKDOWN_EXT = ['toc', 'fenced_code', 'codehilite', 'tables']
+
+embedpattern = re.compile('\$(?P<funcname>.*)\((?P<args>.*)\)\$')
 
 def render(template, app, **kwargs):
     vars = {
@@ -43,6 +47,22 @@ def valid_auth(environ):
         return authenticate(username, password)
     else:
         return False
+
+def patch_content(text):
+    start = 0
+    while start < len(text):
+        match = embedpattern.search(text, start)
+        if match:
+            groups = match.groupdict()
+            args = groups['args'].split(',')
+            if hasattr(embed, groups['funcname']):
+                func = getattr(embed, groups['funcname'])
+                text = embedpattern.sub(func(*args), text)
+            start = match.endpos
+        else:
+            break
+    text = text.replace('\n', '  \n')
+    return text
 
 class WikiPage(object):
     def __init__(self):
@@ -75,7 +95,7 @@ class WikiPage(object):
         yield render(self.data['templates/wiki.html'], self.app,
             title=pagename,
             raw_content=content,
-            content=markdown(content, MARKDOWN_EXT))
+            content=markdown(patch_content(content), MARKDOWN_EXT))
         return
     
     def POST(self, pagename=None):
@@ -86,7 +106,7 @@ class WikiPage(object):
         try:
             content = self.app.get_content()['content'].value
             self.data[pagename] = content
-            yield markdown(content, MARKDOWN_EXT)
+            yield markdown(patch_content(content), MARKDOWN_EXT)
         except:
             self.app.status = '500 Internal Server Error'
             yield 'Unable to write content to data store\n'

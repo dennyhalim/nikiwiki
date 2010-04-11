@@ -4,35 +4,52 @@
 	<link rel="stylesheet" type="text/css" href="%(STATIC_URL)s/css/base.css" />
 	<script src="%(STATIC_URL)s/js/jquery.js"></script>
 	<script type="text/javascript">
+	revert = '';
+
+	function save_content() {
+		var content = $('textarea.editbox').val();
+
+		$.ajax({
+			type: 'POST',
+			url: '%(BASE_URL)s/%(title)s',
+			cache: false,
+			async: false,
+			data: {
+				content: content
+			},
+			success: function(txt) {
+				revert = content;
+				$('#content').html(txt);
+			}
+		});
+	}
+
+	function hide_textarea() {
+		$('#editable').hide();
+		$('#content').show();
+		$('textarea.editbox').val(revert);
+		setup_handlers();
+	}
+
 	function setup_handlers() {
 		$('h1, h2, h3, h4, h5, h6, a.pagetitle').click(function() {
-			var revert = $('textarea.editbox').val();
+			revert = $('textarea.editbox').val();
 			$('#content').hide()
 			$('#editable').show();
 			$('textarea.editbox').focus();
 
-			$('input.save').click(function() {
-				var content = $('textarea.editbox').val();
-
-				$.post('/%(title)s', {
-					content: content
-				}, function(txt) {
-					$('#editable').hide();
-					$('#content').show().html(txt);
-					setup_handlers();
-				});
+			$('#buttons .save').click(function() {
+				save_content();
+				hide_textarea();
 			});
-
-			$('input.cancel').click(function() {
-				$('textarea.editbox').val(revert);
-				$('#editable').hide();
-				$('#content').show();
-				setup_handlers();
+			$('#buttons .cancel').click(function() {
+				hide_textarea();
 			});
 		});
 	}
 
 	$(document).ready(function() {
+		revert = $('textarea.editbox').val();
 		setup_handlers();
 		if(document.location.protocol != 'https:') {
 			$('#header').append('<div class="warning">This is an insecure page. <a href="#" name="secure">Switch to SSL</a></div>');
@@ -41,6 +58,20 @@
 				document.location.protocol = 'https';
 			});
 		}
+
+		$('#delete').click(function() {
+			if(!confirm('Are you sure you want to delete %(title)s?')) {
+				return;
+			}
+
+			$.ajax({
+				type: 'DELETE',
+				url: '%(BASE_URL)s/%(title)s',
+				success: function() {
+					$('#content').html('Deleted. Go back to <a href="%(BASE_URL)s/Main_Page">Main_Page</a>?');
+				}
+			});
+		});
 	});
 	</script>
 </head>
@@ -49,9 +80,10 @@
 <div id="container">
 	<div id="header">
 		<div class="top">
-			<div class="name">%(SITE_NAME)s</div>
+			<div class="name"><a href="%(BASE_URL)s/">%(SITE_NAME)s</a></div>
 			<div class="links">
 				<a href="#" class="pagetitle">%(title)s</a>
+				<a href="#" id="delete">[x]</a>
 			</div>
 		</div>
 		<div class="bottom">
@@ -62,7 +94,7 @@
 	<div id="content">%(content)s</div>
 	<div id="editable">
 		<textarea class="editbox">%(raw_content)s</textarea>
-		<div><input type="button" value="Save" class="save" /> or <input type="button" value="Cancel" class="cancel" /></div>
+		<div id="buttons"><input type="button" value="Save" class="save" /> or <input type="button" value="Cancel" class="cancel" /></div>
 	</div>
 </div>
 </body>
