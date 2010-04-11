@@ -15,7 +15,7 @@ Requirements
 ------------
 - A recent Python. Tested with 2.5, but older versions may work as well
 - Markdown python module <http://www.freewisdom.org/projects/python-markdown/Installation>
-- Flup <http://trac.saddi.com/flup>
+- WebOb <http://pythonpaste.org/webob/>
 - PAM <http://atlee.ca/software/pam/>
 
 Installation
@@ -24,38 +24,13 @@ Open niki.py in your favorite editor and change INSTALL_DIR to point to the dire
 
 - SITE_NAME defines the title of the page
 - SITE_MOTTO is the text displayed below the site name at the top left of the page
-- STATIC_URL should point to the location of the nikiwiki/static/ directory accessible to web users. By default, web.py will serve it at /static but using this value is not recommended for performance reasons. Ideally, you would create a symlink to this directory from somewhere within your web server's docroot.
+- STATIC_URL should point to the location of the nikiwiki/static/ directory accessible to web users. By default, the niki app will serve it at /static but this method is slow and has not been tested for security or robustness. Ideally, you would create a symlink to this directory from somewhere within your web server's docroot.
 
-Save the niki.py file and run `python niki.py` to start the server for debugging. At this point, you should be able to access the wiki at <http://localhost:8080/>. For further customization of the web server and more production-like configuration, read the [web.py documentation](http://webpy.org/cookbook)
-
-Example FastCGI/nginx configuration
------------------------------------
-Place the following in your nginx configuration
-<code><pre>location / {
-    fastcgi_pass	127.0.0.1:9999;
-    fastcgi_param   PATH_INFO    $fastcgi_script_name;
-    fastcgi_param   REQUEST_METHOD  $request_method;
-    fastcgi_param   QUERY_STRING	$query_string;
-    fastcgi_param   CONTENT_TYPE	$content_type;
-    fastcgi_param   CONTENT_LENGTH  $content_length;
-    fastcgi_param   SERVER_ADDR	 $server_addr;
-    fastcgi_param   SERVER_PORT	 $server_port;
-    fastcgi_param   SERVER_NAME	 $server_name;
-    fastcgi_param   SERVER_PROTOCOL $server_protocol;
-    fastcgi_pass_header Authorization;
-    fastcgi_intercept_errors off;
-}
-location /static {
-    root /path/to/nikiwiki/static;
-}</pre></code>
-
-Start the nikiwiki server `python niki.py fcgi 127.0.0.1:9999`
-
-Assuming the rest of your nginx configuration is correct, you should be able to access the wiki through nginx. At this point, adding things like authentication and logging are trivial. See the [nginx documentation](http://wiki.codemongers.com/NginxModules) for details.
+Save the niki.py file and run `python niki.py` to start the server for debugging. At this point, you should be able to access the wiki at <http://localhost:8082/>.
 
 Internals
 ---------
-NikiWiki is a RESTful application in that you can perform the usual view, create, update, and delete actions through standard HTTP methods. The implemented methods are as follows:
+NikiWiki is a (mostly) RESTful application in that you can perform the usual view, create, update, and delete actions through standard HTTP methods. The implemented methods are as follows:
 
 - GET requests will return an HTML representation of the page with all the JavaScript trimmings. It wouldn't be too difficult to add a GET variable along the lines of ?format=txt to return the raw data, but I haven't had a need for that sort of functionality yet.
 - POST requests are required to pass in a variable named 'content' that contains the full markdown text of the page as entered by the user. The response body is the HTML result of running the content through the markdown parser. If the page in question does not exist, it will be created, otherwise, it will be overwritten.
@@ -64,8 +39,7 @@ NikiWiki is a RESTful application in that you can perform the usual view, create
 
 A few quick notes on the implementation details:
 
-- The render() method takes a variable number of keyword arguments that are merged with a pre-populated dict and passed to the string content of a template for formatting. This provides rudimentary templating support. If you want a more featureful templating system, take a look at [Cheetah](http://www.cheetahtemplate.org/) or [Mako](http://www.makotemplates.org/).
-- The sanitize() method attempts to remove any malicious characters from a pagename variable. This is in no way foolproof and only acts as a measure against the simplest attacks. If you want to make NikiWiki more secure, this is probably a good place to start.
+- The render() method takes a variable number of keyword arguments that are merged with a pre-populated dict and passed to the string content of a template for formatting. This provides rudimentary templating support. If you want a more featureful templating system, take a look at [Jinja](http://jinja.pocoo.org/) or [Mako](http://www.makotemplates.org/).
 
 Caveats
 -------
